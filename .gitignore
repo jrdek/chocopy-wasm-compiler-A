@@ -11,3 +11,5 @@ mochawesome-report
 package-lock.json
 coverage
 .nyc_output
+.vscode/*
+./debugstart.ts

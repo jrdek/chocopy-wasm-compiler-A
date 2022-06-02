@@ -75,6 +75,7 @@ export type Expr<A> =
   | {  a?: A, tag: "builtin1", name: string, arg: Expr<A> }
   | {  a?: A, tag: "builtin2", name: string, left: Expr<A>, right: Expr<A>}
   | {  a?: A, tag: "call", fn: Expr<A>, arguments: Array<Expr<A>> } 
+  | {  a?: A, tag: "builtinarb", name: string, args: Expr<A>[] }
   | {  a?: A, tag: "lookup", obj: Expr<A>, field: string }
   | {  a?: A, tag: "index", obj: Expr<A>, index: Expr<A> } // a[0]
   | {  a?: A, tag: "slice", obj: Expr<A>, index_s?: Expr<A>, index_e?: Expr<A> }

@@ -1,6 +1,8 @@
 import { parse } from "./parser";
 import { BasicREPL } from "./repl";
-import { addLibs  } from "./tests/import-object.test";
+import { importObject, addLibs  } from "./tests/import-object.test";
+import { stringifyTree } from "./treeprinter";
+import {parser} from '@lezer/python';
 
 
 // entry point for debugging
@@ -12,10 +14,13 @@ class C(object):
       return 0
     else:
       return`
-  // var source = `
-  // class C(object):
-  //   def __init__(self:C, other:D):
-  //     pass
+  source = `
+  x:float=2.4
+  b:float=3.34
+  b = x
+  print(x)
+`;
+  console.log(stringifyTree(parser.parse(source).cursor(),source, 0));
   
   // x:C = None
   // x = C()`
@@ -28,5 +33,4 @@ const ast = parse(source);
 }
 
 debug();
-
-
+var na = 1

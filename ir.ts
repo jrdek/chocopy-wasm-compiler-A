@@ -27,6 +27,7 @@ export type Expr<A> =
   | {  a?: A, tag: "uniop", op: UniOp, expr: Value<A> }
   | {  a?: A, tag: "builtin1", name: string, arg: Value<A> }
   | {  a?: A, tag: "builtin2", name: string, left: Value<A>, right: Value<A>}
+  | {  a?: A, tag: "builtinarb", name: string, args: Value<A>[]}
   | {  a?: A, tag: "call", name: string, arguments: Array<Value<A>> } 
   | {  a?: A, tag: "call_indirect", fn: Expr<A>, arguments: Array<Value<A>> } 
   | {  a?: A, tag: "alloc", amount: Value<A> }
@@ -36,6 +37,7 @@ export type Value<A> =
     { a?: A, tag: "num", value: bigint }
   | { a?: A, tag: "float", value: number }
   | { a?: A, tag: "wasmint", value: number }
+  | { a?: A, tag: "float", value: number }
   | { a?: A, tag: "bool", value: boolean }
   | { a?: A, tag: "id", name: string }
   | { a?: A, tag: "none" }

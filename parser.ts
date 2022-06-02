@@ -3,6 +3,13 @@ import { TreeCursor } from "@lezer/common";
 import { Program, Expr, Stmt, UniOp, BinOp, Parameter, Type, FunDef, VarInit, Class, Literal, Annotation, Location, NonlocalVarInit, TypeVar, DestructuringAssignment, AssignVar } from "./ast";
 import { NUM, FLOAT, BOOL, NONE, ELLIPSIS, CLASS, CALLABLE, LIST } from "./utils";
 import { stringifyTree } from "./treeprinter";
+import { isFloat32Array } from "util/types";
+
+export function isFloat(n : string) : boolean {
+  // not considering bignum here, only consider 32-bit float
+  const floatChars = /[.e]/;
+  return floatChars.test(n);
+}
 
 const MKLAMBDA = "mklambda";
 
@@ -78,11 +85,6 @@ function wrap_locs<T extends Function>(traverser: T, storeSrc: boolean = false):
   };
 }
 
-export function isFloat(n : string) : boolean {
-  // 32-bit float, with form 1.234 or 1e15 (Lezer would consider both as float, for inf and nan we'll treat separately)
-  const floatChars = /[.e]/;
-  return floatChars.test(n);
-}
 
 export const traverseLiteral = wrap_locs(traverseLiteralHelper);
 export function traverseLiteralHelper(c: TreeCursor, s: string, env: ParserEnv): Literal<Annotation> {
@@ -106,6 +108,10 @@ export function traverseLiteralHelper(c: TreeCursor, s: string, env: ParserEnv):
     case "None":
       return {
         tag: "none"
+      }
+      case "Ellipsis":
+      return {
+        tag: "..."
       }
     // case "Ellipsis": // x: Ellipsis = ...
     //   return {
@@ -234,8 +240,14 @@ export function traverseExprHelper(c: TreeCursor, s: string, env: ParserEnv): Ex
         };
       } else if (callExpr.tag === "id") {
         const callName = callExpr.name;
-        var expr: Expr<Annotation>;
-        if (callName === "print" || callName === "abs" || callName === "len") {
+        var expr : Expr<Annotation>;
+        if (callName === "print" && args.length !== 1) {
+          return {
+            tag: "builtinarb",
+            name: callName,
+            args: args
+          };
+        } else if (callName === "abs" || callName === "len" || callName === "print") {
           return {
             tag: "builtin1",
             name: callName,

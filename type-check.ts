@@ -80,6 +80,9 @@ defaultGlobalFunctions.set("abs", [[NUM], NUM]);
 defaultGlobalFunctions.set("max", [[NUM, NUM], NUM]);
 defaultGlobalFunctions.set("min", [[NUM, NUM], NUM]);
 defaultGlobalFunctions.set("pow", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("gcd", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("lcm", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("factorial", [[NUM], NUM]);
 defaultGlobalFunctions.set("print", [[CLASS("object")], NUM]);
 defaultGlobalFunctions.set("len", [[LIST(NUM)], NUM]);
 
@@ -139,7 +142,7 @@ export function equalTypeParams(params1: Type[], params2: Type[]) : boolean {
 
 export function equalType(t1: Type, t2: Type) : boolean {
   return (
-    (t1.tag === t2.tag && (t1.tag === NUM.tag || t1.tag === BOOL.tag || t1.tag === NONE.tag || t1.tag === FLOAT.tag)) ||
+    (t1.tag === t2.tag && (t1.tag === NUM.tag || t1.tag === BOOL.tag || t1.tag === NONE.tag || t1.tag === FLOAT.tag || t1.tag === ELLIPSIS.tag)) ||
     (t1.tag === "class" && t2.tag === "class" && t1.name === t2.name) ||
     (t1.tag === "callable" && t2.tag === "callable" && equalCallable(t1, t2)) ||
     (t1.tag === "typevar" && t2.tag === "typevar" && t1.name === t2.name) ||
@@ -566,6 +569,9 @@ export function tcDestructuringAssignment(env : GlobalTypeEnv, locals : LocalTyp
 
 export function tcStmt(env: GlobalTypeEnv, locals: LocalTypeEnv, stmt: Stmt<Annotation>, SRC: string): Stmt<Annotation> {
   switch(stmt.tag) {
+    // case "import":
+    //   // TODO: bypass typechecking for now
+    //   return {a: NONE, tag: stmt.tag, mod: stmt.mod, name: stmt.name, alias: stmt.alias};
     case "assign":
       const [tDestruct, hasStar] = tcDestructuringAssignment(env, locals, stmt.destruct, SRC);
       const tValExpr = tcExpr(env, locals, stmt.value, SRC);
@@ -753,6 +759,8 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
         case BinOp.Minus:
         case BinOp.Mul:
         case BinOp.IDiv:
+          if ((equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) || (equalType(tLeft.a.type, FLOAT) && equalType(tRight.a.type, FLOAT))) { return { ...tBin, a: { ...expr.a, type: tRight.a.type } } }
+          else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`, expr.a); }
         case BinOp.Mod:
           if (equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) { return { ...tBin, a: { ...expr.a, type: NUM } } }
           else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
@@ -768,7 +776,7 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
         case BinOp.Gte:
         case BinOp.Lt:
         case BinOp.Gt:
-          if (equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
+          if ((equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) || (equalType(tLeft.a.type, FLOAT) && equalType(tRight.a.type, FLOAT))) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
           else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
           expr.a); }
         case BinOp.And:
@@ -787,7 +795,7 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
       const tUni = { ...expr, a: tExpr.a, expr: tExpr }
       switch (expr.op) {
         case UniOp.Neg:
-          if (equalType(tExpr.a.type, NUM)) { return tUni }
+          if (equalType(tExpr.a.type, NUM) || equalType(tExpr.a.type, FLOAT)) { return tUni }
           else { throw new TypeCheckError(SRC, `Unary operator \`${stringifyOp(expr.op)}\` expects type "number", got ${bigintSafeStringify(tExpr.a.type.tag)}`,
           expr.a); }
         case UniOp.Not:
@@ -825,7 +833,7 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
       if (expr.name === "print") {
         const tArg = tcExpr(env, locals, expr.arg, SRC);
         
-        if (!equalType(tArg.a.type, NUM) && !equalType(tArg.a.type, BOOL) && !equalType(tArg.a.type, NONE)) {
+        if (!equalType(tArg.a.type, NUM) && !equalType(tArg.a.type, BOOL) && !equalType(tArg.a.type, NONE)&& !equalType(tArg.a.type, FLOAT)&& !equalType(tArg.a.type, {tag:"..."})) {
            throw new TypeCheckError(SRC, `print() expects types "int" or "bool" or "none" as the argument, got ${bigintSafeStringify(tArg.a.type.tag)}`, tArg.a);
         }
         return { ...expr, a: tArg.a, arg: tArg };
@@ -853,6 +861,17 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
           throw new TypeCheckError(SRC, `Function call expects arguments of types ${bigintSafeStringify(leftTyp.tag)} and ${bigintSafeStringify(rightTyp.tag)}, got ${bigintSafeStringify(tLeftArg.a.type.tag)} and ${bigintSafeStringify(tRightArg.a.type.tag)}`,
             expr.a);
         }
+      } else {
+        throw new TypeCheckError(SRC, "Undefined function: " + expr.name, expr.a);
+      }
+    case "builtinarb":
+      if (expr.name === "print") {
+        var tArgs:Expr<Annotation>[] = []
+        expr.args.forEach(arg => {
+          tArgs.push(tcExpr(env, locals, arg, SRC));
+        });
+        
+        return { ...expr, a: {...expr.a, type: {tag: "none"}}, args: tArgs };
       } else {
         throw new TypeCheckError(SRC, "Undefined function: " + expr.name, expr.a);
       }

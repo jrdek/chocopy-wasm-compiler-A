@@ -13,6 +13,7 @@ export async function run(source: string) {
 }
 
 export const NUM : Type = {tag: "number"}
+export const FLOAT : Type = {tag: "float"};
 export const BOOL : Type = {tag: "bool"}
 export const NONE : Type = {tag: "none"}
 export function CLASS(name : string, params: Array<Type> = []) : Type { 
