@@ -1,7 +1,7 @@
 import { BinOp, Parameter, Type, UniOp} from "./ast";
 import { Stmt, Expr, Value, VarInit, BasicBlock, Program, FunDef, Class } from "./ir";
 
-import { isTagBoolean, isTagNone, isTagId, isTagBigInt, isTagEqual, checkValueEquality, checkCompileValEquality, checkStmtEquality, isTagEllipsis } from "./optimization_utils"; 
+import { isTagBoolean, isTagNone, isTagId, isTagBigInt, isTagEqual, checkValueEquality, checkCompileValEquality, checkStmtEquality, isTagEllipsis, isTagFloat } from "./optimization_utils"; 
 
 type Env = {
     vars: Map<string, compileVal>;
@@ -107,13 +107,21 @@ export function optimizeExpression(e: Expr<Type>, env: Env): Expr<Type>{
            var optimizedValue: Value<any> = optimizeValue(e.value, env);
            return {...e, value: optimizedValue};
         case "binop":
+           
             var left = optimizeValue(e.left, env);
+            
             var right = optimizeValue(e.right, env);
+            if (isTagFloat(left) || isTagFloat(right)){
+                return e
+            }
             if (left.tag === "id" || right.tag === "id" || !checkIfFoldableBinOp(e.op, left, right))
                 return {...e, left: left, right: right};
             var val: Value<any> = evaluateBinOp(e.op, left, right);
             return {tag: "value", value: val};
         case "uniop":
+            if (isTagFloat(left) || isTagFloat(right)){
+                return e
+            }
             var arg = optimizeValue(e.expr, env);
             if (arg.tag === "id")
                 return {...e, expr: arg};
