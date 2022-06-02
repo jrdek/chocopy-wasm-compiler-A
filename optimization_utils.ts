@@ -39,8 +39,8 @@ export function checkValueEquality(a: Value<any>, b: Value<any>): boolean{
         if (a.name === b.name) return true;
         return false;
     }
-    else if (a.value === b.value)
-        return true;
+    // else if (a.value === b.value)
+    //     return true;
     return false;
 }
 

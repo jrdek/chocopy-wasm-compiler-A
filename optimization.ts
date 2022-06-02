@@ -71,7 +71,7 @@ export function evaluateBinOp(op: BinOp, leftVal: Value<any>, rightVal: Value<an
         if(!isTagEqual(leftVal, rightVal) || isTagNone(leftVal) || isTagNone(rightVal) || isTagId(leftVal) || isTagId(rightVal))
             throw new Error("Compiler Error: Function should be invoked only if the expression can be folded");
         switch(op){
-            case BinOp.Eq: return {tag: "bool", value: leftVal.value === rightVal.value};
+            // case BinOp.Eq: return {tag: "bool", value: leftVal.value === rightVal.value};
 
         }
     }
@@ -85,12 +85,12 @@ export function evaluateBinOp(op: BinOp, leftVal: Value<any>, rightVal: Value<an
 
 export function evaluateUniOp(op: UniOp, val: Value<any>): Value<any>{
     switch(op){
-        case UniOp.Neg:
+        // case UniOp.Neg:
 
-            if (isTagId(val) || isTagNone(val) || isTagBoolean(val)) 
-                throw new Error("Compiler Error");
-            const minus1: bigint = -1n;
-            return {tag: "num", value: minus1 as bigint * (val.value as bigint)};
+        //     if (isTagId(val) || isTagNone(val) || isTagBoolean(val)) 
+        //         throw new Error("Compiler Error");
+        //     const minus1: bigint = -1n;
+        //     return {tag: "num", value: minus1 as bigint * (val.value as bigint)};
 
         case UniOp.Not:
 
@@ -107,12 +107,13 @@ export function optimizeExpression(e: Expr<Type>, env: Env): Expr<Type>{
            var optimizedValue: Value<any> = optimizeValue(e.value, env);
            return {...e, value: optimizedValue};
         case "binop":
-            var left = optimizeValue(e.left, env);
-            var right = optimizeValue(e.right, env);
-            if (left.tag === "id" || right.tag === "id" || !checkIfFoldableBinOp(e.op, left, right))
-                return {...e, left: left, right: right};
-            var val: Value<any> = evaluateBinOp(e.op, left, right);
-            return {tag: "value", value: val};
+            return e
+            // var left = optimizeValue(e.left, env);
+            // var right = optimizeValue(e.right, env);
+            // if (left.tag === "id" || right.tag === "id" || !checkIfFoldableBinOp(e.op, left, right))
+            //     return {...e, left: left, right: right};
+            // var val: Value<any> = evaluateBinOp(e.op, left, right);
+            // return {tag: "value", value: val};
         case "uniop":
             var arg = optimizeValue(e.expr, env);
             if (arg.tag === "id")
