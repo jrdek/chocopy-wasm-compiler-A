@@ -15,6 +15,7 @@ export function optimizeValue(val: Value<any>, env: Env): Value<any>{
     if (val.tag !== "id"){
         return val;
     }
+    
     if (env.vars.has(val.name)){
         if (["nac", "undef"].includes(env.vars.get(val.name).tag))
             return val;

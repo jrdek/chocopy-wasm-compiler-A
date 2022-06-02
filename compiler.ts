@@ -324,6 +324,7 @@ function codeGenExpr(expr: Expr<Annotation>, env: GlobalEnv): Array<string> {
       if(expr.start.tag === "float"){
         return [
           ...codeGenValue(expr.start, env),
+          `(i32.const 0)`,
           `call $assert_not_none`,
           ...codeGenValue(expr.offset, env),
           `call $load_float`
