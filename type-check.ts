@@ -1,5 +1,6 @@
+import { table } from 'console';
 import { Annotation, Location, stringifyOp, Stmt, Expr, Type, UniOp, BinOp, Literal, Program, FunDef, VarInit, Class, Callable, TypeVar, Parameter, DestructuringAssignment, Assignable, AssignVar } from './ast';
-import { NUM, BOOL, NONE, CLASS, CALLABLE, TYPEVAR, LIST } from './utils';
+import { NUM, BOOL, NONE, CLASS, CALLABLE, TYPEVAR, LIST, FLOAT, ELLIPSIS } from './utils';
 import { emptyEnv } from './compiler';
 import { fullSrcLine, drawSquiggly } from './errors';
 
@@ -80,6 +81,9 @@ defaultGlobalFunctions.set("abs", [[NUM], NUM]);
 defaultGlobalFunctions.set("max", [[NUM, NUM], NUM]);
 defaultGlobalFunctions.set("min", [[NUM, NUM], NUM]);
 defaultGlobalFunctions.set("pow", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("gcd", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("lcm", [[NUM, NUM], NUM]);
+defaultGlobalFunctions.set("factorial", [[NUM], NUM]);
 defaultGlobalFunctions.set("print", [[CLASS("object")], NUM]);
 defaultGlobalFunctions.set("len", [[LIST(NUM)], NUM]);
 
@@ -139,7 +143,7 @@ export function equalTypeParams(params1: Type[], params2: Type[]) : boolean {
 
 export function equalType(t1: Type, t2: Type) : boolean {
   return (
-    (t1.tag === t2.tag && (t1.tag === NUM.tag || t1.tag === BOOL.tag || t1.tag === NONE.tag)) ||
+    (t1.tag === t2.tag && (t1.tag === NUM.tag || t1.tag === BOOL.tag || t1.tag === NONE.tag || t1.tag === FLOAT.tag)) ||
     (t1.tag === "class" && t2.tag === "class" && t1.name === t2.name) ||
     (t1.tag === "callable" && t2.tag === "callable" && equalCallable(t1, t2)) ||
     (t1.tag === "typevar" && t2.tag === "typevar" && t1.name === t2.name) ||
@@ -172,7 +176,7 @@ export function join(env: GlobalTypeEnv, t1: Type, t2: Type): Type {
 // classes and that all instantiated type-parameters are valid.
 export function isValidType(env: GlobalTypeEnv, t: Type) : boolean {
   // primitive types are valid types.
-  if(t.tag === "number" || t.tag === "bool" || t.tag === "none") {
+  if(t.tag === "number" || t.tag === "bool" || t.tag === "none" || t.tag === "float" || t.tag === "...") {
     return true;
   }
 
@@ -200,19 +204,21 @@ export function isValidType(env: GlobalTypeEnv, t: Type) : boolean {
   // TODO: handle all other newer non-class types here
 
   // At this point we know t is a CLASS
-  if(!env.classes.has(t.name)) {
-    return false;  
-  }
-  
-  let [_fieldsTy, _methodsTy, typeparams] = env.classes.get(t.name);
+  if (t.tag==="class"){
+    if( !env.classes.has(t.name)) {
+      return false;  
+    }
+    
+    let [_fieldsTy, _methodsTy, typeparams] = env.classes.get(t.name);
 
-  if(t.params.length !== typeparams.length) {
-    return false; 
-  }
+    if(t.params.length !== typeparams.length) {
+      return false; 
+    }
 
-  return zip(typeparams, t.params).reduce((isValid, [typevar, typeparam]) => {
-    return isValid && isValidType(env, typeparam);
-  }, true);
+    return zip(typeparams, t.params).reduce((isValid, [typevar, typeparam]) => {
+      return isValid && isValidType(env, typeparam);
+    }, true);
+  }
 }
 
 // Populate the instantiated type-parameters of the class type objTy in
@@ -269,7 +275,7 @@ export function specializeMethodType(env: GlobalTypeEnv, objTy: Type, [argTypes,
 // to their current instantiated types.
 export function specializeType(env: Map<string, Type>, t: Type) : Type {
   // primitive types cannot be specialized any further.
-  if(t.tag === "either" || t.tag === "none" || t.tag === "bool" || t.tag === "number") {
+  if(t.tag === "either" || t.tag === "none" || t.tag === "bool" || t.tag === "number"|| t.tag === "float" || t.tag === "..."){
     return t;
   } 
 
@@ -375,7 +381,8 @@ export function tcInit(env: GlobalTypeEnv, init: VarInit<Annotation>, SRC: strin
   if (isAssignable(env, valTyp, init.type)) {
     return { ...init, a: { ...init.a, type: NONE } };
   } else {
-    throw new TypeCheckError(SRC, `Expected type ${bigintSafeStringify(init.type.tag)}; got type ${bigintSafeStringify(valTyp.tag)}`, init.value.a);
+    if (init.value.tag === "none" || init.value.tag === "...") throw new TypeCheckError(SRC, `Expected type ${bigintSafeStringify(init.type.tag)}; got type ${bigintSafeStringify(valTyp.tag)}`)
+    else throw new TypeCheckError(SRC, `Expected type ${bigintSafeStringify(init.type.tag)}; got type ${bigintSafeStringify(valTyp.tag)}`, init.value.a);
   }
 }
 
@@ -566,6 +573,9 @@ export function tcDestructuringAssignment(env : GlobalTypeEnv, locals : LocalTyp
 
 export function tcStmt(env: GlobalTypeEnv, locals: LocalTypeEnv, stmt: Stmt<Annotation>, SRC: string): Stmt<Annotation> {
   switch(stmt.tag) {
+    case "import":
+      // TODO: bypass typechecking for now
+      return {a: { ...stmt.a, type: NONE }, tag: stmt.tag, mod: stmt.mod, name: stmt.name, alias: stmt.alias};
     case "assign":
       const [tDestruct, hasStar] = tcDestructuringAssignment(env, locals, stmt.destruct, SRC);
       const tValExpr = tcExpr(env, locals, stmt.value, SRC);
@@ -753,6 +763,11 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
         case BinOp.Minus:
         case BinOp.Mul:
         case BinOp.IDiv:
+          // if ((equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) || (equalType(tLeft.a.type, FLOAT) && equalType(tRight.a.type, FLOAT))) { return { a: tRight.a, ...tBin } }
+          // else { throw new TypeCheckError("Type mismatch for numeric op" + expr.op); }
+          if ((equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) || (equalType(tLeft.a.type, FLOAT) && equalType(tRight.a.type, FLOAT))) { return { ...tBin, a: { ...expr.a, type: tRight.a.type } } }
+          else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
+            expr.a); }
         case BinOp.Mod:
           if (equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) { return { ...tBin, a: { ...expr.a, type: NUM } } }
           else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
@@ -761,14 +776,14 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
         case BinOp.Neq:
           if (tLeft.a.type.tag === "class" || tRight.a.type.tag === "class") throw new TypeCheckError(SRC, "cannot apply operator '==' on class types")
           if(tLeft.a.type.tag === "typevar" || tRight.a.type.tag === "typevar") throw new TypeCheckError(SRC, "cannot apply operator '==' on unconstrained type parameters")
-          if (equalType(tLeft.a.type, tRight.a.type)) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
+          if (equalType(tLeft.a.type, tRight.a.type) && !equalType(tLeft.a.type, ELLIPSIS)) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
           else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects the same type on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
             expr.a); }
         case BinOp.Lte:
         case BinOp.Gte:
         case BinOp.Lt:
         case BinOp.Gt:
-          if (equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM)) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
+          if (equalType(tLeft.a.type, NUM) && equalType(tRight.a.type, NUM) || (equalType(tLeft.a.type, FLOAT) && equalType(tRight.a.type, FLOAT))) { return { ...tBin, a: { ...expr.a, type: BOOL } }; }
           else { throw new TypeCheckError(SRC, `Binary operator \`${stringifyOp(expr.op)}\` expects type "number" on both sides, got ${bigintSafeStringify(tLeft.a.type.tag)} and ${bigintSafeStringify(tRight.a.type.tag)}`,
           expr.a); }
         case BinOp.And:
@@ -787,7 +802,7 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
       const tUni = { ...expr, a: tExpr.a, expr: tExpr }
       switch (expr.op) {
         case UniOp.Neg:
-          if (equalType(tExpr.a.type, NUM)) { return tUni }
+          if (equalType(tExpr.a.type, NUM)|| equalType(tExpr.a.type, FLOAT))  { return tUni }
           else { throw new TypeCheckError(SRC, `Unary operator \`${stringifyOp(expr.op)}\` expects type "number", got ${bigintSafeStringify(tExpr.a.type.tag)}`,
           expr.a); }
         case UniOp.Not:
@@ -822,7 +837,21 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
       return {a: { ...expr.a, type: expr.type }, tag: "lambda", params: expr.params, type: expr.type, expr: ret}
     case "builtin1":
       // TODO: type check `len` after lists are implemented
-      if (expr.name === "print") {
+      // if (expr.name === "print") {
+      //   const tArg = tcExpr(env, locals, expr.arg, SRC);
+      if (expr.name === "int" || expr.name === "bool") {
+        const tArg = tcExpr(env, locals, expr.arg,SRC);
+        if (tArg.a !== NUM && tArg.a !== BOOL){
+          throw new TypeError("Function call type mismatch: " + expr.name);
+        }
+        // if (expr.name === "bool"){
+        //   return {...expr, a: BOOL, arg: tArg};
+        // }
+        // return {...expr, a: NUM, arg: tArg};
+        
+        return {...expr, a: tArg.a, arg: tArg};
+      } else if(env.functions.has(expr.name)) {
+        const [[expectedArgTyp], retTyp] = env.functions.get(expr.name);
         const tArg = tcExpr(env, locals, expr.arg, SRC);
         
         if (!equalType(tArg.a.type, NUM) && !equalType(tArg.a.type, BOOL) && !equalType(tArg.a.type, NONE)) {
@@ -855,6 +884,17 @@ export function tcExpr(env: GlobalTypeEnv, locals: LocalTypeEnv, expr: Expr<Anno
         }
       } else {
         throw new TypeCheckError(SRC, "Undefined function: " + expr.name, expr.a);
+      }
+    case "builtinarb":
+      if (expr.name === "print") {
+        var tArgs:Expr<Annotation>[] = []
+        expr.args.forEach(arg => {
+          tArgs.push(tcExpr(env, locals, arg, SRC));
+        });
+        
+        return { ...expr, a: { ...expr.a, type: NONE }, args: tArgs };
+      } else {
+        throw new TypeError("Undefined function: " + expr.name);
       }
     case "call":
       if (expr.fn.tag === "id" && env.classes.has(expr.fn.name)) {
@@ -1039,5 +1079,8 @@ export function tcIterator(env : GlobalTypeEnv, locals : LocalTypeEnv, iterator:
       case "bool": return BOOL;
       case "num": return NUM;
       case "none": return NONE;
+      // TODO: check import of inf if necessary
+      case "float": return FLOAT;
+      case "...": return ELLIPSIS;
     }
   }

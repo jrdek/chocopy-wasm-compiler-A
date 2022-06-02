@@ -157,6 +157,8 @@ function literalToVal(lit: AST.Literal<Annotation>) : IR.Value<Annotation> {
     case "num":
     case "bool":
     case "none":
+    case "float":
+    case "...":
         return lit
   }
 }
@@ -258,6 +260,9 @@ function flattenListComp(e: any, env : GlobalEnv, blocks: Array<IR.BasicBlock<An
 
 function flattenStmt(s : AST.Stmt<Annotation>, blocks: Array<IR.BasicBlock<Annotation>>, env : GlobalEnv) : [Array<IR.VarInit<Annotation>>, Array<IR.Class<Annotation>>] {
   switch(s.tag) {
+    case "import":
+      // TODO(rongyi): bypass import lowering
+      return [undefined, undefined];
     case "assign":
       if(s.destruct.isSimple === true) {
         var [valinits, valstmts, vale, classes] = flattenExprToExpr(s.value, blocks, env);
@@ -630,6 +635,16 @@ function flattenExprToExpr(e : AST.Expr<Annotation>, blocks: Array<IR.BasicBlock
           left: lval,
           right: rval
         }, [...lclasses, ...rclasses]];
+       
+    case "builtinarb":
+      // var [inits, stmts, args] = flattenExprToVal(e.args, env);
+      const argpairs = e.args.map(a => flattenExprToVal(a,blocks, env));
+      const arginits = argpairs.map(cp => cp[0]).flat();
+      const argstmts = argpairs.map(cp => cp[1]).flat();
+      const argvals = argpairs.map(cp => cp[2]).flat();
+      const argclasses = argpairs.map(cp => cp[3]).flat();
+
+      return [arginits, argstmts, { tag: "builtinarb", a: e.a, name: e.name, args: argvals }, argclasses];
     case "call":
       const [finits, fstmts, fval, fclasses] = flattenExprToVal(e.fn, blocks, env);
       const callpairs = e.arguments.map(a => flattenExprToVal(a, blocks, env));
@@ -835,9 +850,18 @@ function flattenExprToExpr(e : AST.Expr<Annotation>, blocks: Array<IR.BasicBlock
         [...objClasses, ...idxClasses]
       ];
     case "id":
-      return [[], [], {tag: "value", value: { ...e }}, []];
+      // return [[], [], {tag: "value", value: { ...e }}, []];
+      if (e.a.type.tag === "float") {
+        var newNameFloat = e.name;
+        return [[], [], {
+          tag: "load",
+          start: {tag: "id", name: newNameFloat, a: e.a},
+          offset: { tag: "wasmint", value: 0 }},[]];
+      }
+      return [[], [], {a:e.a, tag: "value", value: { ...e }},[]];
     case "literal":
-      return [[], [], {tag: "value", value: literalToVal(e.value) }, [] ];
+      var aa = e.a
+      return [[], [], {a:aa, tag: "value", value: {...literalToVal(e.value), a:aa}}, [] ];
     case "if-expr": {
       var thenLbl = generateName("$ifExprThen");
       var elseLbl = generateName("$ifExprElse");
@@ -886,6 +910,8 @@ function flattenExprToExpr(e : AST.Expr<Annotation>, blocks: Array<IR.BasicBlock
 
       const [cinits, cstmts, cval, cclasses] = flattenExprToExpr(constrExpr, blocks, env);
       return [cinits, cstmts, cval, [...irClass, ...cclasses]];
+    // case "literal":
+    //   return [[], [], {tag: "value", value: {a:e.a, ...literalToVal(e.value)} }, []];
   }
 }
 

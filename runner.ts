@@ -8,7 +8,7 @@ import { compile, GlobalEnv } from './compiler';
 import {parse} from './parser';
 import {emptyLocalTypeEnv, GlobalTypeEnv, tc, tcStmt} from  './type-check';
 import { Annotation, FunDef, Program, Type, Value } from './ast';
-import { PyValue, NONE, BOOL, NUM, CLASS, makeWasmFunType } from "./utils";
+import { PyValue, NONE, BOOL, NUM, CLASS, makeWasmFunType, FLOAT } from "./utils";
 import { closureName, lowerProgram } from './lower';
 import { monomorphizeProgram } from './monomorphizer';
 import { optimizeProgram } from './optimization';
@@ -99,7 +99,7 @@ export async function run(source : string, config: Config) : Promise<[Value<Anno
   // console.log("LASTEXPR", lastExpr);
   if(progTyp !== NONE) {
     returnType = "(result i32)";
-    returnExpr = "(local.get $$last)"
+    returnExpr = "(local.get $$last)";
   } 
   let globalsBefore = config.env.globals;
   // const compiled = compiler.compile(tprogram, config.env);
@@ -136,10 +136,15 @@ export async function run(source : string, config: Config) : Promise<[Value<Anno
     (func $print_num (import "imports" "print_num") (param i32) (result i32))
     (func $print_bool (import "imports" "print_bool") (param i32) (result i32))
     (func $print_none (import "imports" "print_none") (param i32) (result i32))
-    (func $abs (import "imports" "abs") (param i32) (result i32))
-    (func $min (import "imports" "min") (param i32) (param i32) (result i32))
-    (func $max (import "imports" "max") (param i32) (param i32) (result i32))
-    (func $pow (import "imports" "pow") (param i32) (param i32) (result i32))
+    (func $print_newline (import "imports" "print_newline") (param i32) (result i32))
+    (func $print_ellipsis (import "imports" "print_ellipsis") (param i32) (result i32))
+    (func $print_float (import "imports" "print_float") (param f32) (result i32))
+    ;;(func $abs (import "imports" "abs") (param i32) (result i32))
+    ;;(func $int (import "imports" "abs") (param i32) (result i32))
+    ;;(func $bool (import "imports" "abs") (param i32) (result i32))
+    ;;(func $min (import "imports" "min") (param i32) (param i32) (result i32))
+    ;;(func $max (import "imports" "max") (param i32) (param i32) (result i32))
+    ;;(func $pow (import "imports" "pow") (param i32) (param i32) (result i32))
     (func $destructure_check (import "imports" "destructure_check") (param i32) (result i32))
     (func $alloc (import "libmemory" "alloc") (param i32) (result i32))
     (func $load (import "libmemory" "load") (param i32) (param i32) (result i32))
@@ -156,7 +161,14 @@ export async function run(source : string, config: Config) : Promise<[Value<Anno
     (func $$lt (import "imports" "$lt") (param i32) (param i32) (result i32))
     (func $$gt (import "imports" "$gt") (param i32) (param i32) (result i32))
     (func $$bignum_to_i32 (import "imports" "$bignum_to_i32") (param i32) (result i32))
+
+    (func $store_float (import "libmemory" "store_float") (param i32) (param i32) (param f32))
+    (func $load_float (import "libmemory" "load_float") (param i32) (param i32) (result f32))
+    (func $gcd (import "imports" "gcd") (param i32) (param i32) (result i32))
+    (func $lcm (import "imports" "lcm") (param i32) (param i32) (result i32))
+    (func $factorial (import "imports" "factorial") (param i32) (result i32))
     ${types}
+
     ${globalImports}
     ${globalDecls}
     ${vtable}
@@ -167,6 +179,8 @@ export async function run(source : string, config: Config) : Promise<[Value<Anno
       ${returnExpr}
     )
   )`;
+  console.log(wasmSource);
+  // throw new Error(`${wasmSource}`);
   const [result, instance] = await runWat(wasmSource, importObject);
 
   return [PyValue(progTyp, result), compiled.newEnv, tenv, compiled.functions, instance];

@@ -6,6 +6,5 @@ cli
 *.sw*
 mochawesome-report
 *lock*
-.vscode
-*.DS_Store
-package-lock.json
+.vscode/*
+./debugstart.ts

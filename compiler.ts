@@ -1,7 +1,9 @@
 import { Program, Stmt, Expr, Value, Class, VarInit, FunDef } from "./ir"
 import { Annotation, BinOp, Type, UniOp } from "./ast"
-import { APPLY, BOOL, createMethodName, makeWasmFunType, NONE, NUM } from "./utils";
+import { APPLY, BOOL, createMethodName, makeWasmFunType, NONE, NUM, ELLIPSIS, FLOAT } from "./utils";
 import { equalType } from "./type-check";
+import { errorMonitor } from "events";
+
 
 export type GlobalEnv = {
   globals: Map<string, boolean>;
@@ -50,6 +52,8 @@ export function compile(ast: Program<Annotation>, env: GlobalEnv) : CompileResul
   definedVars.forEach(env.locals.add, env.locals);
   const localDefines = makeLocals(definedVars);
   const globalNames = ast.inits.map(init => init.name);
+  console.log(ast.inits, globalNames);
+
   const funs : Array<string> = [];
   ast.funs.forEach(f => {
     funs.push(codeGenDef(f, withDefines).join("\n"));
@@ -75,7 +79,7 @@ export function compile(ast: Program<Annotation>, env: GlobalEnv) : CompileResul
   bodyCommands += ") ;; end $loop"
 
   // const commandGroups = ast.stmts.map((stmt) => codeGenStmt(stmt, withDefines));
-  const allCommands = [...localDefines, ...inits, bodyCommands];
+  const allCommands = [...localDefines, ...inits, bodyCommands]; 
   withDefines.locals.clear();
   ast.inits.forEach(x => withDefines.globals.set(x.name, true));
   return {
@@ -97,6 +101,37 @@ function codeGenStmt(stmt: Stmt<Annotation>, env: GlobalEnv): Array<string> {
       ]
     case "assign":
       var valStmts = codeGenExpr(stmt.value, env);
+      if (stmt.value.tag === "load" && stmt.value.start.tag === "float") {
+        var ret: string[] = [];
+        ret.push(`(i32.const 4)`);
+        ret.push(`(call $alloc)`);
+        ret.push(`(local.set $$scratch)`);
+        ret.push(`(local.get $$scratch)`);
+        ret.push(`(local.get $$scratch)`);
+        ret.push(`(i32.const 0)`)
+
+        ret = ret.concat(valStmts)
+
+        ret.push(`(call $store_float)`);
+
+    
+
+        valStmts = ret
+      }
+
+    //     if (stmt.a.tag === "float") {
+    //       var ret: string[] = [];
+    //       if (env.locals.has(stmt.name)) {
+    //         ret = ret.concat([`(local.get $${stmt.name})`]);
+    //       } else {
+    //         ret = ret.concat([`(global.get $${stmt.name})`]);
+    //       }
+    //       ret = ret.concat([`(i32.const 0)`]);
+    //       ret = ret.concat(valStmts);
+    //       ret = ret.concat([`(call $store_float)`]); 
+    //     return ret
+    //   }
+    // }
       if (env.locals.has(stmt.name)) {
         return valStmts.concat([`(local.set $${stmt.name})`]); 
       } else {
@@ -144,16 +179,52 @@ function codeGenExpr(expr: Expr<Annotation>, env: GlobalEnv): Array<string> {
       return codeGenValue(expr.value, env)
 
     case "binop":
-      const lhsStmts = codeGenValue(expr.left, env);
-      const rhsStmts = codeGenValue(expr.right, env);
-      return [...lhsStmts, ...rhsStmts, codeGenBinOp(expr.op)];
+      var lhsStmts = codeGenValue(expr.left, env);
+      var rhsStmts = codeGenValue(expr.right, env);
+      if (expr.left.a.type.tag === "float"){
+        lhsStmts = lhsStmts.concat(`(i32.const 0)`)
+        lhsStmts = lhsStmts.concat([`(call $load_float);; load left`]);
+        rhsStmts = rhsStmts.concat(`(i32.const 0)`)
+        rhsStmts = rhsStmts.concat([`(call $load_float);; load right`]);
+        if (expr.a.type.tag === "float"){
+          var ret : string[] = [];
+          ret.push(`(i32.const 4)`);
+          ret.push(`(call $alloc)`);
+          ret.push(`(local.set $$scratch)`);
+          ret.push(`(local.get $$scratch)`);
+          ret.push(`(local.get $$scratch);; store new`);
+          ret.push(`(i32.const 0)`)
+          ret = ret.concat([...lhsStmts, ...rhsStmts, codeGenBinOp(expr.op, expr.left.a.type)]);
+          ret.push(`(call $store_float)`);
+          // ret.push(`(local.get $$scratch)`);
+
+          return ret;
+        }
+      }
+      return [...lhsStmts, ...rhsStmts, codeGenBinOp(expr.op, expr.left.a.type)] // Assume that expr.left.a===expr.right.a
 
     case "uniop":
-      const exprStmts = codeGenValue(expr.expr, env);
+      var exprStmts = codeGenValue(expr.expr, env);
       switch(expr.op){
         case UniOp.Neg:
-          // negate bignum length to indicate sign change
-          return [
+          if(expr.expr.a.type.tag === "float"){
+            exprStmts = exprStmts.concat(`(i32.const 0)`)
+            exprStmts = exprStmts.concat([`(call $load_float)`])
+            var ret: string[] = [];
+            ret.push(`(i32.const 4)`);
+            ret.push(`(call $alloc)`);
+            ret.push(`(local.set $$scratch)`);
+            ret.push(`(local.get $$scratch)`);
+            ret.push(`(local.get $$scratch)`);
+            ret.push(`(i32.const 0)`)
+            ret = ret.concat([`(f32.const 0)`, ...exprStmts, `(f32.sub)`]);
+            ret.push(`(call $store_float)`);
+            // ret.push(`(local.get $$scratch)`);
+
+            return ret;
+
+          }
+          return[
             ...exprStmts,
             `(local.set $$scratch)`, // bignum addr
             `(local.get $$scratch)`, // store addr
@@ -174,13 +245,7 @@ function codeGenExpr(expr: Expr<Annotation>, env: GlobalEnv): Array<string> {
       const argTyp = expr.a.type;
       const argStmts = codeGenValue(expr.arg, env);
       var callName = expr.name;
-      if (expr.name === "print" && equalType(argTyp, NUM)) {
-        callName = "print_num";
-      } else if (expr.name === "print" && equalType(argTyp, BOOL)) {
-        callName = "print_bool";
-      } else if (expr.name === "print" && equalType(argTyp, NONE)) {
-        callName = "print_none";
-      } else if (expr.name === "len") {
+     if (expr.name === "len") {
         return [...argStmts, "(i32.const 0)", "call $load"];
       }
 
@@ -190,6 +255,52 @@ function codeGenExpr(expr: Expr<Annotation>, env: GlobalEnv): Array<string> {
       const leftStmts = codeGenValue(expr.left, env);
       const rightStmts = codeGenValue(expr.right, env);
       return [...leftStmts, ...rightStmts, `(call $${expr.name})`]
+
+    case "builtinarb":
+      // var argTyp = expr.a;
+      var argsStmts:Array<string> = [";;call builtin function\n"]
+      var callName = expr.name;
+      
+
+      
+      if (expr.name === "print"){
+        expr.args.forEach(arg => {
+          argsStmts = argsStmts.concat(codeGenValue(arg, env));
+          switch (arg.a.type) {
+            case NUM:
+              argsStmts = argsStmts.concat([`(call $print_num)`]);
+              argsStmts = argsStmts.concat([`(drop)`]);
+              break;
+            case BOOL:
+              argsStmts = argsStmts.concat([`(call $print_bool)`]);
+              argsStmts = argsStmts.concat([`(drop)`]);
+              break;
+            case NONE:
+              argsStmts = argsStmts.concat([`(call $print_none)`]);
+              argsStmts = argsStmts.concat([`(drop)`]);
+              break;
+            case ELLIPSIS:
+              argsStmts = argsStmts.concat([`(call $print_ellipsis)`]);
+              argsStmts = argsStmts.concat([`(drop)`]);
+              break;
+            case FLOAT:
+              argsStmts = argsStmts.concat(`(i32.const 0)`)
+              argsStmts = argsStmts.concat([`(call $load_float)`]);
+              argsStmts = argsStmts.concat([`(call $print_float)`]);
+              argsStmts = argsStmts.concat([`(drop)`]);
+              break;
+            default:
+              break;
+          }
+        });
+        argsStmts = argsStmts.concat([`(i32.const 0)`]);
+        callName = "print_newline"
+        // argsStmts = argsStmts.concat([`(call $${callName})`]);
+      }
+      // return argsStmts
+
+      return argsStmts.concat([`(call $${callName})`]);
+
 
     case "call":
       var valStmts = expr.arguments.map((arg) => codeGenValue(arg, env)).flat();
@@ -210,6 +321,15 @@ function codeGenExpr(expr: Expr<Annotation>, env: GlobalEnv): Array<string> {
         `call $alloc`
       ];
     case "load":
+      if(expr.start.tag === "float"){
+        return [
+          ...codeGenValue(expr.start, env),
+          `call $assert_not_none`,
+          ...codeGenValue(expr.offset, env),
+          `call $load_float`
+        ]
+      }
+      
       return [
         ...codeGenValue(expr.start, env),
         ...codeGenValue(expr.offset, env),
@@ -265,9 +385,40 @@ function codeGenValue(val: Value<Annotation>, env: GlobalEnv): Array<string> {
       return return_val;
     case "wasmint":
       return ["(i32.const " + val.value + ")"];
+    case "float":
+      const returnVal : string[] = [];
+      returnVal.push(`(i32.const 4)`);
+      returnVal.push(`(call $alloc)`);
+      returnVal.push(`(local.set $$scratch)`);
+      if (val.value === Infinity){
+        returnVal.push(`(local.get $$scratch)`);
+        returnVal.push(`(i32.const 0)`)
+        returnVal.push(`(f32.const inf)`);
+        returnVal.push(`(call $store_float)`);
+        // returnVal.push(`(f32.const inf)`);
+      }
+      else if (val.value === NaN){
+        returnVal.push(`(local.get $$scratch)`);
+        returnVal.push(`(i32.const 0)`)
+        returnVal.push(`(f32.const nan)`);
+        returnVal.push(`(call $store_float)`);
+        // returnVal.push(`(f32.const nan)`);
+      }
+      else {
+        returnVal.push(`(local.get $$scratch)`);
+        returnVal.push(`(i32.const 0)`)
+        returnVal.push("(f32.const " + val.value + ")");
+        returnVal.push(`(call $store_float)`);
+        // returnVal.push("(f32.const " + val.value + ")");
+      }
+      returnVal.push(`(local.get $$scratch)`);
+      return returnVal;
+    //   return ["(f32.const " + val.value + ")"];
     case "bool":
       return [`(i32.const ${Number(val.value)})`];
     case "none":
+      return [`(i32.const 0)`];
+    case "...":
       return [`(i32.const 0)`];
     case "id":
       if (env.locals.has(val.name)) {
@@ -278,32 +429,32 @@ function codeGenValue(val: Value<Annotation>, env: GlobalEnv): Array<string> {
   }
 }
 
-function codeGenBinOp(op : BinOp) : string {
+function codeGenBinOp(op : BinOp, tp:Type) : string {
   switch(op) {
     case BinOp.Plus:
-      return "(call $$add)"
+      return tp.tag !== "float" ? "(call $$add)" : "(f32.add)"
     case BinOp.Minus:
-      return "(call $$sub)"
+      return tp.tag !== "float" ? "(call $$sub)" : "(f32.sub)"
     case BinOp.Mul:
-      return "(call $$mul)"
+      return tp.tag !== "float" ? "(call $$mul)" : "(f32.mul)"
     case BinOp.IDiv:
-      return "(call $$div)"
+      return tp.tag !== "float" ? "(call $$div)" : "(f32.div)"
     case BinOp.Mod:
       return "(call $$mod)"
     case BinOp.Eq:
       return "(call $$eq)"
     case BinOp.Neq:
-      return "(call $$neq)"
+      return tp.tag !== "float" ? "(call $$neq)" : "(f32.ne)"
     case BinOp.Lte:
-      return "(call $$lte)"
+      return tp.tag !== "float" ? "(call $$lte)" : "(f32.le)"
     case BinOp.Gte:
-      return "(call $$gte)"
+      return tp.tag !== "float" ? "(call $$gte)" : "(f32.ge)"
     case BinOp.Lt:
-      return "(call $$lt)"
+      return tp.tag !== "float" ? "(call $$lt)" : "(f32.lt)"
     case BinOp.Gt:
-      return "(call $$gt)"
+      return tp.tag !== "float" ? "(call $$gt)" : "(f32.gt)"
     case BinOp.Is:
-      return "(i32.eq)";
+      return tp.tag !== "float" ? "(i32.eq)": "(f32.eq)"
     case BinOp.And:
       return "(i32.and)"
     case BinOp.Or:
@@ -325,7 +476,7 @@ function codeGenDef(def : FunDef<Annotation>, env : GlobalEnv) : Array<string> {
   def.inits.forEach(v => definedVars.add(v.name));
   definedVars.add("$last");
   definedVars.add("$selector");
-  definedVars.add("$scratch");
+  definedVars.add("$scratch"); // for memory allocation
   // def.parameters.forEach(p => definedVars.delete(p.name));
   definedVars.forEach(env.locals.add, env.locals);
   def.parameters.forEach(p => env.locals.add(p.name));

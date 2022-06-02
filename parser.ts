@@ -1,8 +1,15 @@
 import { parser } from "@lezer/python";
 import { TreeCursor } from "@lezer/common";
 import { Program, Expr, Stmt, UniOp, BinOp, Parameter, Type, FunDef, VarInit, Class, Literal, Annotation, Location, NonlocalVarInit, TypeVar, DestructuringAssignment, AssignVar } from "./ast";
-import { NUM, BOOL, NONE, CLASS, CALLABLE, LIST } from "./utils";
+import { NUM, BOOL, NONE, CLASS, CALLABLE, LIST, FLOAT, ELLIPSIS } from "./utils";
 import { stringifyTree } from "./treeprinter";
+import { isFloat32Array } from "util/types";
+
+export function isFloat(n : string) : boolean {
+  // not considering bignum here, only consider 32-bit float
+  const floatChars = /[.e]/;
+  return floatChars.test(n);
+}
 
 const MKLAMBDA = "mklambda";
 
@@ -82,6 +89,13 @@ export const traverseLiteral = wrap_locs(traverseLiteralHelper);
 export function traverseLiteralHelper(c: TreeCursor, s: string, env: ParserEnv): Literal<Annotation> {
   switch (c.type.name) {
     case "Number":
+      const tonum = Number(s.substring(c.from, c.to));
+      if (isFloat(s.substring(c.from, c.to))){
+        return {
+        tag: "float",
+        value: tonum
+        } 
+      }
       return {
         tag: "num",
         value: BigInt(s.substring(c.from, c.to))
@@ -95,9 +109,24 @@ export function traverseLiteralHelper(c: TreeCursor, s: string, env: ParserEnv):
       return {
         tag: "none"
       }
-    case "VariableName":
-      let vname = s.substring(c.from, c.to).trim();
-      if (vname !== "__ZERO__") {
+    case "Ellipsis":
+      return {
+        tag: "..."
+      }
+    case "VariableName": // x : float = inf
+      if (s.substring(c.from, c.to) === "inf"){
+        return {
+          tag: "float",
+          value: Infinity
+        }
+      }
+      else if (s.substring(c.from, c.to) === "nan"){
+        return {
+          tag: "float",
+          value: NaN,
+        }
+      }
+      else if (s.substring(c.from, c.to).trim() !== "__ZERO__") {
         throw new Error("ParseError: Not a literal");
       }
       return { 
@@ -114,10 +143,11 @@ export function traverseExprHelper(c: TreeCursor, s: string, env: ParserEnv): Ex
     case "Number":
     case "Boolean":
     case "None":
-      return {
-        tag: "literal",
+    case "Ellipsis":
+      return { 
+        tag: "literal", 
         value: traverseLiteral(c, s, env)
-      }
+      }      
     case "VariableName":
       return {
         tag: "id",
@@ -198,14 +228,19 @@ export function traverseExprHelper(c: TreeCursor, s: string, env: ParserEnv): Ex
         };
       } else if (callExpr.tag === "id") {
         const callName = callExpr.name;
-        var expr: Expr<Annotation>;
-        if (callName === "print" || callName === "abs" || callName === "len") {
+        if (callName === "print") {
+          return {
+            tag: "builtinarb",
+            name: callName,
+            args: args
+          };
+        } else if (callName === "abs"  || callName === "int" || callName === "bool" || callName === "factorial" || callName === "len") {
           return {
             tag: "builtin1",
             name: callName,
             arg: args[0],
           };
-        } else if (callName === "max" || callName === "min" || callName === "pow") {
+        } else if (callName === "max" || callName === "min" || callName === "pow" || callName === "gcd" || callName === "lcm") {
           return {
             tag: "builtin2",
             name: callName,
@@ -493,6 +528,28 @@ export function traverseLambdaParams(c : TreeCursor, s : string) : Array<string>
 export const traverseStmt = wrap_locs(traverseStmtHelper);
 export function traverseStmtHelper(c: TreeCursor, s: string, env: ParserEnv): Stmt<Annotation> {
   switch (c.node.type.name) {
+// export function traverseStmt(c : TreeCursor, s : string) : Stmt<null> {
+  // switch(c.node.type.name) {
+    case "ImportStatement":
+      let importStatement: Stmt<null> = {tag: "import", mod: "", name: []};
+
+      c.firstChild();
+      if(s.substring(c.from, c.to).trim() === "from"){ // from x import y
+        c.nextSibling();
+        const from_name = s.substring(c.from, c.to);
+        c.nextSibling();
+        c.nextSibling();
+        const import_name = s.substring(c.from, c.to); 
+        // TODO(rongyi): did not handle multiple imports
+        importStatement.mod = from_name;
+        importStatement.name = [import_name];
+      } else { // import x
+        c.nextSibling();
+        const from_name = s.substring(c.from, c.to);
+        importStatement.mod = from_name
+      }
+      c.parent()
+      return importStatement;
     case "ReturnStatement":
       c.firstChild();  // Focus return keyword
 
@@ -730,7 +787,9 @@ export function traverseType(c : TreeCursor, s : string, env: ParserEnv) : Type 
       let name = s.substring(c.from, c.to);
       switch(name) {
         case "int": return NUM;
+        case "float": return FLOAT;
         case "bool": return BOOL;
+        case "Ellipsis": return ELLIPSIS;
         default: return CLASS(name);
       }
     case "None": // None is mentionable in Callable types

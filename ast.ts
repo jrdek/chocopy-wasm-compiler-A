@@ -17,9 +17,11 @@ export type Location = {
 export type Callable = {tag: "callable"; params: Array<Type>; ret: Type };
 export type Type =
   | {tag: "number"}
+  | {tag: "float"}
   | {tag: "bool"}
   | {tag: "none"}
   | {tag: "class", name: string, params: Array<Type> }
+  | {tag: "..."}
   | {tag: "either", left: Type, right: Type }
   | {tag: "typevar", name: string }
   | Callable
@@ -52,6 +54,7 @@ export type Stmt<A> =
   | {  a?: A, tag: "while", cond: Expr<A>, body: Array<Stmt<A>> }
   | {  a?: A, tag: "nonlocal", name: string }
   | {  a?: A, tag: "for", iterator: string, values: Expr<A>, body: Array<Stmt<A>> }
+  | {  a?: A, tag: "import", mod: string, name?: Array<string>, alias?: string }
 
 // isSimple should be true when destruct has no comma(,)
 // e.g. a, = 1, -> isSimple = false
@@ -63,6 +66,9 @@ export type Assignable<A> =
   | { a?: A; tag: "lookup"; obj: Expr<A>; field: string }
 
 export type AssignVar<A> = { a?: A, target: Assignable<A>, ignorable: boolean, star: boolean }
+  | {  a?: A, tag: "import", mod: string, name?: Array<string>, alias?: string ,
+  target?: Assignable<A>, ignorable?: boolean, star?: boolean 
+}
 
 export type Lambda<A> = {  a?: A, tag: "lambda", params: Array<string>, type: Callable, expr: Expr<A> };
 export type Expr<A> =
@@ -73,6 +79,8 @@ export type Expr<A> =
   | {  a?: A, tag: "builtin1", name: string, arg: Expr<A> }
   | {  a?: A, tag: "builtin2", name: string, left: Expr<A>, right: Expr<A>}
   | {  a?: A, tag: "call", fn: Expr<A>, arguments: Array<Expr<A>> } 
+  | {  a?: A, tag: "builtinarb", name: string, args: Expr<A>[] }
+
   | {  a?: A, tag: "lookup", obj: Expr<A>, field: string }
   | {  a?: A, tag: "index", obj: Expr<A>, index: Expr<A> } // a[0]
   | {  a?: A, tag: "slice", obj: Expr<A>, index_s?: Expr<A>, index_e?: Expr<A> }
@@ -93,8 +101,11 @@ export type Expr<A> =
 export type Literal<A> = 
     { a?: A, tag: "num", value: bigint }
   | { a?: A, tag: "bool", value: boolean }
+  | { a?: A, tag: "float", value: number} // use inf for typechecking imports of math or inf (from math import inf)
   | { a?: A, tag: "none" }
   | { a?: A, tag: "zero" }
+  | { tag: "none" }
+  | { tag: "..."}
 
 // TODO: should we split up arithmetic ops from bool ops?
 export enum BinOp { Plus, Minus, Mul, IDiv, Mod, Eq, Neq, Lte, Gte, Lt, Gt, Is, And, Or};
